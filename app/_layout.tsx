@@ -1,24 +1,54 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+// ============================================
+// app/_layout.tsx - Root Layout with Authentication
+// ============================================
+
+import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
+import { AuthProvider, useAuth } from '../context/AuthContext';
+import { COLORS } from '../utils/constants';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+function RootLayoutNav() {
+  const { user, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+  useEffect(() => {
+    if (loading) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+    
+    console.log('[RootLayout] User:', user?.email || 'null', 'inAuthGroup:', inAuthGroup, 'loading:', loading);
+
+    if (!user && !inAuthGroup) {
+      // Redirect to sign in
+      console.log('[RootLayout] Redirecting to auth...');
+      router.replace('/(auth)');
+    } else if (user && inAuthGroup) {
+      // Redirect to home
+      console.log('[RootLayout] Redirecting to app...');
+      router.replace('/(app)');
+    }
+  }, [user, loading, segments]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background }}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
+  return <Slot />;
+}
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <AuthProvider>
+      <StatusBar style="light" />
+      <RootLayoutNav />
+    </AuthProvider>
   );
 }
