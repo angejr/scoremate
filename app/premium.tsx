@@ -1,36 +1,88 @@
 // ============================================
-// app/premium.tsx - Premium Screen
+// app/premium.tsx - Premium Screen with RevenueCat IAP
 // ============================================
 
 import { useRouter } from 'expo-router';
 import { doc, updateDoc } from 'firebase/firestore';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import Purchases, { PurchasesPackage } from 'react-native-purchases';
 import { useAuth } from '../context/AuthContext';
 import { auth, db } from '../firebase.config';
 import { COLORS, PREMIUM_PRICE } from '../utils/constants';
 
-// Note: expo-in-app-purchases may need additional setup for production
-// For now, we'll implement a test mode that can be replaced with real IAP
+// RevenueCat API Keys - Replace with your actual keys from RevenueCat dashboard
+const REVENUECAT_API_KEY_IOS = 'appl_YOUR_IOS_KEY_HERE';
+const REVENUECAT_API_KEY_ANDROID = 'goog_YOUR_ANDROID_KEY_HERE';
+const PRODUCT_ID = 'scoremate_premium_early_adopter';
 
 export default function PremiumScreen() {
   const router = useRouter();
   const { refreshUserData } = useAuth();
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [premiumPackage, setPremiumPackage] = useState<PurchasesPackage | null>(null);
+  const [isConfigured, setIsConfigured] = useState(false);
+
+  useEffect(() => {
+    initializePurchases();
+  }, []);
+
+  const initializePurchases = async () => {
+    try {
+      // Only initialize on native platforms
+      if (Platform.OS === 'web') {
+        setIsLoading(false);
+        return;
+      }
+
+      const apiKey = Platform.OS === 'ios' ? REVENUECAT_API_KEY_IOS : REVENUECAT_API_KEY_ANDROID;
+
+      // Skip initialization in dev mode if keys aren't set
+      if (apiKey.includes('YOUR_')) {
+        console.log('[Premium] RevenueCat not configured - using development mode');
+        setIsLoading(false);
+        return;
+      }
+
+      // Configure RevenueCat
+      Purchases.configure({ apiKey });
+
+      // Link with Firebase user
+      if (auth.currentUser) {
+        await Purchases.logIn(auth.currentUser.uid);
+      }
+
+      // Fetch available packages
+      const offerings = await Purchases.getOfferings();
+      if (offerings.current?.availablePackages.length) {
+        const pkg = offerings.current.availablePackages.find(
+          (p) => p.product.identifier === PRODUCT_ID
+        );
+        setPremiumPackage(pkg || offerings.current.availablePackages[0]);
+      }
+
+      setIsConfigured(true);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('[Premium] Error initializing purchases:', error);
+      setIsLoading(false);
+    }
+  };
 
   const unlockPremium = async () => {
     try {
       if (!auth.currentUser) return;
-      
+
       await updateDoc(doc(db, 'users', auth.currentUser.uid), {
         isPremium: true,
         premiumPurchaseDate: new Date(),
@@ -46,46 +98,95 @@ export default function PremiumScreen() {
     setIsPurchasing(true);
 
     try {
-      // In production, integrate with expo-in-app-purchases or RevenueCat
-      // For development/testing, we'll simulate the purchase
-      
-      if (__DEV__) {
-        // Development mode - simulate purchase
+      // Web platform - show message
+      if (Platform.OS === 'web') {
         Alert.alert(
-          'Development Mode',
-          'In production, this will connect to Apple/Google for payment. For now, simulating purchase...',
+          'Purchase on Mobile',
+          'In-app purchases are only available on iOS and Android. Please use the mobile app to upgrade.',
+          [{ text: 'OK', onPress: () => setIsPurchasing(false) }]
+        );
+        return;
+      }
+
+      // Development mode or RevenueCat not configured
+      if (!isConfigured || __DEV__) {
+        Alert.alert(
+          __DEV__ ? 'Development Mode' : 'Coming Soon',
+          __DEV__
+            ? 'In production, this will connect to Apple/Google for payment. For now, simulating purchase...'
+            : 'In-app purchases will be available when the app is published.',
           [
             { text: 'Cancel', style: 'cancel', onPress: () => setIsPurchasing(false) },
             {
-              text: 'Simulate Purchase',
+              text: __DEV__ ? 'Simulate Purchase' : 'OK',
               onPress: async () => {
-                try {
-                  await unlockPremium();
-                  Alert.alert(
-                    'Success! 🎉',
-                    'You are now a premium member! Enjoy all the features.',
-                    [{ text: 'Awesome!', onPress: () => router.back() }]
-                  );
-                } catch (error) {
-                  Alert.alert('Error', 'Failed to unlock premium. Please try again.');
+                if (__DEV__) {
+                  try {
+                    await unlockPremium();
+                    Alert.alert('Success! 🎉', 'You are now a premium member!', [
+                      { text: 'Awesome!', onPress: () => router.back() },
+                    ]);
+                  } catch {
+                    Alert.alert('Error', 'Failed to unlock premium.');
+                  }
                 }
                 setIsPurchasing(false);
-              }
-            }
+              },
+            },
           ]
         );
+        return;
+      }
+
+      // Production purchase flow with RevenueCat
+      if (premiumPackage) {
+        const { customerInfo } = await Purchases.purchasePackage(premiumPackage);
+
+        // Check if purchase was successful
+        if (customerInfo.entitlements.active['premium'] !== undefined) {
+          await unlockPremium();
+          Alert.alert('Success! 🎉', 'You are now a premium member! Enjoy all the features.', [
+            { text: 'Awesome!', onPress: () => router.back() },
+          ]);
+        }
       } else {
-        // Production mode - implement real IAP here
-        // This would integrate with expo-in-app-purchases or RevenueCat
-        Alert.alert(
-          'Coming Soon',
-          'In-app purchases will be available when the app is published to the stores.',
-          [{ text: 'OK', onPress: () => setIsPurchasing(false) }]
-        );
+        Alert.alert('Error', 'Unable to load purchase options. Please try again later.');
+      }
+    } catch (error: any) {
+      if (error.userCancelled) {
+        console.log('User cancelled purchase');
+      } else {
+        console.error('Purchase error:', error);
+        Alert.alert('Error', 'Something went wrong with the purchase. Please try again.');
+      }
+    } finally {
+      setIsPurchasing(false);
+    }
+  };
+
+  const restorePurchases = async () => {
+    setIsPurchasing(true);
+    try {
+      if (Platform.OS === 'web' || !isConfigured) {
+        Alert.alert('Restore', 'Purchase restoration is only available on mobile devices.');
+        setIsPurchasing(false);
+        return;
+      }
+
+      const customerInfo = await Purchases.restorePurchases();
+
+      if (customerInfo.entitlements.active['premium'] !== undefined) {
+        await unlockPremium();
+        Alert.alert('Restored!', 'Your premium access has been restored.', [
+          { text: 'Great!', onPress: () => router.back() },
+        ]);
+      } else {
+        Alert.alert('No Purchases Found', 'No previous premium purchases were found.');
       }
     } catch (error) {
-      console.error('Purchase error:', error);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      console.error('Restore error:', error);
+      Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+    } finally {
       setIsPurchasing(false);
     }
   };
@@ -94,12 +195,12 @@ export default function PremiumScreen() {
     {
       icon: '✏️',
       title: 'Custom Triggers & Deeds',
-      description: 'Create your own unique items tailored to your relationship',
+      description: "Create your own unique items tailored to your relationship",
     },
     {
       icon: '📸',
       title: 'Photo Evidence',
-      description: 'Attach photos to prove your partner\'s crimes (or your good deeds)',
+      description: "Attach photos to prove your partner's crimes (or your good deeds)",
     },
     {
       icon: '📝',
@@ -107,14 +208,14 @@ export default function PremiumScreen() {
       description: 'Include detailed descriptions with each report',
     },
     {
+      icon: '🔔',
+      title: 'Partner Notifications',
+      description: 'Get notified instantly when your partner reports something',
+    },
+    {
       icon: '🎯',
       title: 'Future Features',
       description: 'Get lifetime access to all upcoming premium features',
-    },
-    {
-      icon: '🏆',
-      title: 'Early Adopter Badge',
-      description: 'Show off your special status to your partner',
     },
     {
       icon: '💰',
@@ -123,19 +224,30 @@ export default function PremiumScreen() {
     },
   ];
 
+  const displayPrice = premiumPackage?.product.priceString || `$${PREMIUM_PRICE}`;
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView}>
         <View style={styles.header}>
           <Text style={styles.headerEmoji}>👑</Text>
           <Text style={styles.headerTitle}>Early Adopter</Text>
-          <Text style={styles.headerPrice}>${PREMIUM_PRICE}</Text>
+          <Text style={styles.headerPrice}>{displayPrice}</Text>
           <Text style={styles.headerSubtitle}>One-time payment • Lifetime access</Text>
         </View>
 
         <View style={styles.featuresContainer}>
           <Text style={styles.featuresTitle}>Premium Features</Text>
-          
+
           {features.map((feature, index) => (
             <View key={index} style={styles.featureCard}>
               <Text style={styles.featureIcon}>{feature.icon}</Text>
@@ -156,11 +268,11 @@ export default function PremiumScreen() {
 
         <View style={styles.faqContainer}>
           <Text style={styles.faqTitle}>Frequently Asked Questions</Text>
-          
+
           <View style={styles.faqItem}>
             <Text style={styles.faqQuestion}>Is this a subscription?</Text>
             <Text style={styles.faqAnswer}>
-              Nope! Just a one-time ${PREMIUM_PRICE} payment for lifetime premium access.
+              Nope! Just a one-time {displayPrice} payment for lifetime premium access.
             </Text>
           </View>
 
@@ -189,14 +301,16 @@ export default function PremiumScreen() {
           {isPurchasing ? (
             <ActivityIndicator color="#000" />
           ) : (
-            <Text style={styles.purchaseButtonText}>
-              Unlock Premium - ${PREMIUM_PRICE}
-            </Text>
+            <Text style={styles.purchaseButtonText}>Unlock Premium - {displayPrice}</Text>
           )}
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.restoreButton} onPress={restorePurchases}>
+          <Text style={styles.restoreButtonText}>Restore Purchases</Text>
+        </TouchableOpacity>
+
         <Text style={styles.purchaseNote}>
-          Secure payment processed by {Platform.OS === 'ios' ? 'Apple' : 'Google'}
+          Secure payment processed by {Platform.OS === 'ios' ? 'Apple' : Platform.OS === 'android' ? 'Google' : 'App Store'}
         </Text>
       </View>
     </View>
@@ -210,6 +324,16 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: COLORS.text,
+    marginTop: 10,
   },
   header: {
     padding: 40,
@@ -331,10 +455,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
+  restoreButton: {
+    padding: 15,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  restoreButtonText: {
+    color: COLORS.secondary,
+    fontSize: 14,
+  },
   purchaseNote: {
     textAlign: 'center',
     color: COLORS.textTertiary,
     fontSize: 12,
-    marginTop: 10,
+    marginTop: 5,
   },
 });

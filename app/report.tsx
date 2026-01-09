@@ -8,27 +8,28 @@ import { addDoc, collection } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { auth, db, storage } from '../firebase.config';
 import { DeedItem, TriggerItem } from '../types';
 import { COLORS, GOOD_DEEDS, TRIGGERS } from '../utils/constants';
 import { getWeekNumber } from '../utils/helpers';
+import { sendReportNotification } from '../utils/notifications';
 
 export default function ReportScreen() {
   const router = useRouter();
   const { type } = useLocalSearchParams<{ type: 'trigger' | 'deed' }>();
   const { userData } = useAuth();
-  
+
   const [items, setItems] = useState<(TriggerItem | DeedItem)[]>([]);
   const [selectedItem, setSelectedItem] = useState<TriggerItem | DeedItem | null>(null);
   const [notes, setNotes] = useState('');
@@ -36,16 +37,14 @@ export default function ReportScreen() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Combine default items with custom items if premium
     let baseItems = type === 'trigger' ? [...TRIGGERS] : [...GOOD_DEEDS];
-    
+
     if (userData?.isPremium) {
-      const customItems = type === 'trigger' 
-        ? (userData.customTriggers || [])
-        : (userData.customDeeds || []);
+      const customItems =
+        type === 'trigger' ? userData.customTriggers || [] : userData.customDeeds || [];
       baseItems = [...baseItems, ...customItems];
     }
-    
+
     setItems(baseItems);
   }, [type, userData]);
 
@@ -71,13 +70,13 @@ export default function ReportScreen() {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
-      
+
       const filename = `reports/${auth.currentUser?.uid}/${Date.now()}.jpg`;
       const storageRef = ref(storage, filename);
-      
+
       await uploadBytes(storageRef, blob);
       const downloadURL = await getDownloadURL(storageRef);
-      
+
       return downloadURL;
     } catch (error) {
       console.error('Error uploading photo:', error);
@@ -122,13 +121,24 @@ export default function ReportScreen() {
 
       await addDoc(collection(db, 'reports'), reportData);
 
-      const message = type === 'trigger' 
-        ? `Your partner lost ${Math.abs(item.points)} points for: ${item.name}`
-        : `You gained ${item.points} points for: ${item.name}`;
+      // Send push notification to partner
+      if (userData?.partnerId) {
+        const reporterName = userData.name || 'Your partner';
+        await sendReportNotification(
+          userData.partnerId,
+          reporterName,
+          type as 'trigger' | 'deed',
+          item.name,
+          item.points
+        );
+      }
 
-      Alert.alert('Success!', message, [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+      const message =
+        type === 'trigger'
+          ? `Your partner lost ${Math.abs(item.points)} points for: ${item.name}`
+          : `You gained ${item.points} points for: ${item.name}`;
+
+      Alert.alert('Success!', message, [{ text: 'OK', onPress: () => router.back() }]);
     } catch (error) {
       console.error('Error submitting report:', error);
       Alert.alert('Error', 'Failed to submit report. Please try again.');
@@ -144,7 +154,7 @@ export default function ReportScreen() {
         `Report: ${item.name} (${item.points > 0 ? '+' : ''}${item.points} points)?`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', onPress: () => submitReport(item) }
+          { text: 'Confirm', onPress: () => submitReport(item) },
         ]
       );
     } else {
@@ -193,7 +203,7 @@ export default function ReportScreen() {
           <Text style={styles.sectionTitle}>
             {type === 'trigger' ? '😤 Select Mistake' : '✨ Select Good Deed'}
           </Text>
-          
+
           {items.map((item) => (
             <TouchableOpacity
               key={`${item.isCustom ? 'custom-' : ''}${item.id}`}
@@ -207,11 +217,14 @@ export default function ReportScreen() {
                   {item.isCustom && <Text style={styles.customBadge}>Custom</Text>}
                 </View>
               </View>
-              <Text style={[
-                styles.itemPoints,
-                item.points > 0 ? styles.pointsPositive : styles.pointsNegative
-              ]}>
-                {item.points > 0 ? '+' : ''}{item.points}
+              <Text
+                style={[
+                  styles.itemPoints,
+                  item.points > 0 ? styles.pointsPositive : styles.pointsNegative,
+                ]}
+              >
+                {item.points > 0 ? '+' : ''}
+                {item.points}
               </Text>
             </TouchableOpacity>
           ))}
@@ -223,10 +236,7 @@ export default function ReportScreen() {
             <Text style={styles.upsellText}>
               Add custom {type === 'trigger' ? 'triggers' : 'deeds'}, photos, and notes!
             </Text>
-            <TouchableOpacity
-              style={styles.upsellButton}
-              onPress={() => router.push('/premium')}
-            >
+            <TouchableOpacity style={styles.upsellButton} onPress={() => router.push('/premium')}>
               <Text style={styles.upsellButtonText}>Upgrade Now - $5</Text>
             </TouchableOpacity>
           </View>
@@ -235,12 +245,10 @@ export default function ReportScreen() {
 
       {selectedItem && (
         <View style={styles.submitContainer}>
-          <TouchableOpacity
-            style={styles.submitButton}
-            onPress={() => submitReport(selectedItem)}
-          >
+          <TouchableOpacity style={styles.submitButton} onPress={() => submitReport(selectedItem)}>
             <Text style={styles.submitButtonText}>
-              Submit: {selectedItem.name} ({selectedItem.points > 0 ? '+' : ''}{selectedItem.points})
+              Submit: {selectedItem.name} ({selectedItem.points > 0 ? '+' : ''}
+              {selectedItem.points})
             </Text>
           </TouchableOpacity>
         </View>
