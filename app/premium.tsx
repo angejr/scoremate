@@ -22,7 +22,7 @@ import { COLORS, PREMIUM_PRICE } from '../utils/constants';
 
 // RevenueCat API Keys - Replace with your actual keys from RevenueCat dashboard
 const REVENUECAT_API_KEY_IOS = 'appl_YOUR_IOS_KEY_HERE';
-const REVENUECAT_API_KEY_ANDROID = 'goog_YOUR_ANDROID_KEY_HERE';
+const REVENUECAT_API_KEY_ANDROID = 'goog_KOnxYqOlADdqEnAcXLxTZhoPQwj';
 const PRODUCT_ID = 'scoremate_premium_early_adopter';
 
 export default function PremiumScreen() {
