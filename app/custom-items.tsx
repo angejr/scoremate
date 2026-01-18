@@ -1,24 +1,24 @@
 // ============================================
-// app/custom-items.tsx - Custom Items Screen (Premium)
+// app/custom-items.tsx - Custom Items Screen
 // ============================================
 
 import { useRouter } from 'expo-router';
 import { arrayRemove, arrayUnion, doc, updateDoc } from 'firebase/firestore';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { auth, db } from '../firebase.config';
 import { DeedItem, TriggerItem } from '../types';
-import { COLORS } from '../utils/constants';
+import { COLORS, FREE_TIER_LIMITS } from '../utils/constants';
 
 const EMOJI_OPTIONS = ['😤', '😡', '🙄', '😒', '💢', '🤦', '😠', '👎', '✨', '🌟', '💪', '🎉', '👏', '🏆', '💝', '🙌'];
 
@@ -32,30 +32,31 @@ export default function CustomItemsScreen() {
   const [selectedEmoji, setSelectedEmoji] = useState('😤');
   const [loading, setLoading] = useState(false);
 
-  if (!userData?.isPremium) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.lockedContainer}>
-          <Text style={styles.lockedEmoji}>🔒</Text>
-          <Text style={styles.lockedTitle}>Premium Feature</Text>
-          <Text style={styles.lockedText}>
-            Upgrade to premium to create custom triggers and deeds!
-          </Text>
-          <TouchableOpacity
-            style={styles.upgradeButton}
-            onPress={() => router.push('/premium')}
-          >
-            <Text style={styles.upgradeButtonText}>Upgrade Now - $5</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const customTriggers = userData?.customTriggers || [];
+  const customDeeds = userData?.customDeeds || [];
 
-  const customTriggers = userData.customTriggers || [];
-  const customDeeds = userData.customDeeds || [];
+  // Calculate limits
+  const triggersLimit = userData?.isPremium ? Infinity : FREE_TIER_LIMITS.customTriggers;
+  const deedsLimit = userData?.isPremium ? Infinity : FREE_TIER_LIMITS.customDeeds;
+  const canAddTrigger = userData?.isPremium || customTriggers.length < FREE_TIER_LIMITS.customTriggers;
+  const canAddDeed = userData?.isPremium || customDeeds.length < FREE_TIER_LIMITS.customDeeds;
 
   const openAddModal = (type: 'trigger' | 'deed') => {
+    const canAdd = type === 'trigger' ? canAddTrigger : canAddDeed;
+    const limit = type === 'trigger' ? FREE_TIER_LIMITS.customTriggers : FREE_TIER_LIMITS.customDeeds;
+    
+    if (!canAdd) {
+      Alert.alert(
+        'Limit Reached',
+        `Free users can only create ${limit} custom ${type}s. Upgrade to Premium for unlimited custom items!`,
+        [
+          { text: 'Maybe Later', style: 'cancel' },
+          { text: 'Upgrade', onPress: () => router.push('/premium') },
+        ]
+      );
+      return;
+    }
+
     setEditingType(type);
     setItemName('');
     setItemPoints(type === 'trigger' ? '-5' : '5');
@@ -146,11 +147,30 @@ export default function CustomItemsScreen() {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView}>
+        {/* Free tier info banner */}
+        {!userData?.isPremium && (
+          <View style={styles.freeTierBanner}>
+            <Text style={styles.freeTierText}>
+              Free tier: {FREE_TIER_LIMITS.customTriggers} triggers + {FREE_TIER_LIMITS.customDeeds} deeds
+            </Text>
+            <TouchableOpacity onPress={() => router.push('/premium')}>
+              <Text style={styles.upgradeLink}>Upgrade for unlimited →</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>😤 Custom Triggers</Text>
+            <View style={styles.sectionTitleRow}>
+              <Text style={styles.sectionTitle}>😤 Custom Triggers</Text>
+              {!userData?.isPremium && (
+                <Text style={[styles.limitBadge, !canAddTrigger && styles.limitReached]}>
+                  {customTriggers.length}/{FREE_TIER_LIMITS.customTriggers}
+                </Text>
+              )}
+            </View>
             <TouchableOpacity
-              style={styles.addButton}
+              style={[styles.addButton, !canAddTrigger && styles.addButtonDisabled]}
               onPress={() => openAddModal('trigger')}
             >
               <Text style={styles.addButtonText}>+ Add</Text>
@@ -183,9 +203,16 @@ export default function CustomItemsScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>✨ Custom Good Deeds</Text>
+            <View style={styles.sectionTitleRow}>
+              <Text style={styles.sectionTitle}>✨ Custom Good Deeds</Text>
+              {!userData?.isPremium && (
+                <Text style={[styles.limitBadge, !canAddDeed && styles.limitReached]}>
+                  {customDeeds.length}/{FREE_TIER_LIMITS.customDeeds}
+                </Text>
+              )}
+            </View>
             <TouchableOpacity
-              style={styles.addButton}
+              style={[styles.addButton, !canAddDeed && styles.addButtonDisabled]}
               onPress={() => openAddModal('deed')}
             >
               <Text style={styles.addButtonText}>+ Add</Text>
@@ -308,38 +335,21 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  lockedContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  freeTierBanner: {
+    backgroundColor: `${COLORS.accent}20`,
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 40,
   },
-  lockedEmoji: {
-    fontSize: 64,
-    marginBottom: 20,
-  },
-  lockedTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 10,
-  },
-  lockedText: {
-    fontSize: 16,
+  freeTierText: {
     color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: 30,
+    fontSize: 13,
   },
-  upgradeButton: {
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 10,
-  },
-  upgradeButtonText: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: 'bold',
+  upgradeLink: {
+    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '600',
   },
   section: {
     padding: 20,
@@ -350,16 +360,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 15,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
+  },
+  limitBadge: {
+    fontSize: 12,
+    color: COLORS.secondary,
+    fontWeight: '600',
+    backgroundColor: `${COLORS.secondary}20`,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  limitReached: {
+    color: COLORS.error,
+    backgroundColor: `${COLORS.error}20`,
   },
   addButton: {
     backgroundColor: COLORS.secondary,
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 8,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
   },
   addButtonText: {
     color: '#000',

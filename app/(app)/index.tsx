@@ -328,21 +328,19 @@ export default function HomeScreen() {
             <Text style={styles.buttonTextBlue}>📊 Weekly Leaderboard</Text>
           </TouchableOpacity>
 
-          {userData?.isPremium && (
-            <TouchableOpacity
-              style={styles.buttonCustom}
-              onPress={() => router.push('/custom-items')}
-            >
-              <Text style={styles.buttonText}>✏️ Manage Custom Items</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.buttonCustom}
+            onPress={() => router.push('/custom-items')}
+          >
+            <Text style={styles.buttonText}>✏️ Manage Custom Items</Text>
+          </TouchableOpacity>
 
           {!userData?.isPremium && (
             <TouchableOpacity
               style={styles.buttonPremium}
               onPress={() => router.push('/premium')}
             >
-              <Text style={styles.buttonTextDark}>⭐ Upgrade to Premium ($5)</Text>
+              <Text style={styles.buttonTextDark}>⭐ Go Unlimited ($5)</Text>
             </TouchableOpacity>
           )}
         </View>

@@ -4,11 +4,12 @@
 
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Modal,
   ScrollView,
@@ -21,7 +22,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { auth, db, storage } from '../firebase.config';
 import { DeedItem, TriggerItem } from '../types';
-import { COLORS, GOOD_DEEDS, TRIGGERS } from '../utils/constants';
+import { COLORS, FREE_TIER_LIMITS, GOOD_DEEDS, TRIGGERS } from '../utils/constants';
 import { getWeekNumber } from '../utils/helpers';
 import { sendReportNotification } from '../utils/notifications';
 
@@ -36,22 +37,82 @@ export default function ReportScreen() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [weeklyUsage, setWeeklyUsage] = useState({ photos: 0, notes: 0 });
 
   useEffect(() => {
     let baseItems = type === 'trigger' ? [...TRIGGERS] : [...GOOD_DEEDS];
 
+    // Add custom items (limited for free users)
+    const customItems =
+      type === 'trigger' ? userData?.customTriggers || [] : userData?.customDeeds || [];
+    
     if (userData?.isPremium) {
-      const customItems =
-        type === 'trigger' ? userData.customTriggers || [] : userData.customDeeds || [];
+      // Premium: all custom items
       baseItems = [...baseItems, ...customItems];
+    } else {
+      // Free: only first N custom items within limit
+      const limit = type === 'trigger' ? FREE_TIER_LIMITS.customTriggers : FREE_TIER_LIMITS.customDeeds;
+      baseItems = [...baseItems, ...customItems.slice(0, limit)];
     }
 
     setItems(baseItems);
   }, [type, userData]);
 
-  const pickImage = async () => {
+  useEffect(() => {
+    // Fetch weekly usage for non-premium users
     if (!userData?.isPremium) {
-      router.push('/premium');
+      fetchWeeklyUsage();
+    }
+  }, [userData]);
+
+  const fetchWeeklyUsage = async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      const currentWeek = getWeekNumber(new Date());
+      const currentYear = new Date().getFullYear();
+
+      const reportsRef = collection(db, 'reports');
+      const q = query(
+        reportsRef,
+        where('userId', '==', currentUser.uid),
+        where('weekNumber', '==', currentWeek),
+        where('year', '==', currentYear)
+      );
+
+      const snapshot = await getDocs(q);
+      
+      let photosUsed = 0;
+      let notesUsed = 0;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.photoUrl) photosUsed++;
+        if (data.notes && data.notes.trim() !== '') notesUsed++;
+      });
+
+      setWeeklyUsage({ photos: photosUsed, notes: notesUsed });
+    } catch (error) {
+      console.error('Error fetching weekly usage:', error);
+    }
+  };
+
+  const canAddPhoto = userData?.isPremium || weeklyUsage.photos < FREE_TIER_LIMITS.photosPerWeek;
+  const canAddNote = userData?.isPremium || weeklyUsage.notes < FREE_TIER_LIMITS.notesPerWeek;
+  const photosRemaining = FREE_TIER_LIMITS.photosPerWeek - weeklyUsage.photos;
+  const notesRemaining = FREE_TIER_LIMITS.notesPerWeek - weeklyUsage.notes;
+
+  const pickImage = async () => {
+    if (!canAddPhoto) {
+      Alert.alert(
+        'Weekly Limit Reached',
+        `You've used all ${FREE_TIER_LIMITS.photosPerWeek} free photos this week. Upgrade to Premium for unlimited photos!`,
+        [
+          { text: 'Maybe Later', style: 'cancel' },
+          { text: 'Upgrade', onPress: () => router.push('/premium') },
+        ]
+      );
       return;
     }
 
@@ -65,6 +126,21 @@ export default function ReportScreen() {
     if (!result.canceled) {
       setPhoto(result.assets[0].uri);
     }
+  };
+
+  const handleNotesChange = (text: string) => {
+    if (!canAddNote && text.length > 0 && notes.length === 0) {
+      Alert.alert(
+        'Weekly Limit Reached',
+        `You've used all ${FREE_TIER_LIMITS.notesPerWeek} free notes this week. Upgrade to Premium for unlimited notes!`,
+        [
+          { text: 'Maybe Later', style: 'cancel' },
+          { text: 'Upgrade', onPress: () => router.push('/premium') },
+        ]
+      );
+      return;
+    }
+    setNotes(text);
   };
 
   const uploadPhoto = async (uri: string): Promise<string | null> => {
@@ -104,7 +180,7 @@ export default function ReportScreen() {
 
     try {
       let photoUrl = null;
-      if (photo && userData?.isPremium) {
+      if (photo && canAddPhoto) {
         photoUrl = await uploadPhoto(photo);
       }
 
@@ -117,7 +193,7 @@ export default function ReportScreen() {
         itemName: selectedItem.name,
         points: selectedItem.points,
         photoUrl: photoUrl,
-        notes: userData?.isPremium ? notes : '',
+        notes: canAddNote ? notes : '',
         timestamp: new Date(),
         weekNumber: currentWeek,
         year: new Date().getFullYear(),
@@ -126,7 +202,7 @@ export default function ReportScreen() {
 
       await addDoc(collection(db, 'reports'), reportData);
 
-      // Send push notification to partner
+      // Send push notification to partner (now free for everyone)
       if (userData?.partnerId) {
         const reporterName = userData.name || 'Your partner';
         await sendReportNotification(
@@ -240,49 +316,49 @@ export default function ReportScreen() {
             <View style={styles.divider} />
 
             {/* Photo Section */}
-            <Text style={styles.sectionLabel}>📸 Photo Evidence</Text>
-            {userData?.isPremium ? (
-              <TouchableOpacity style={styles.photoButton} onPress={pickImage}>
-                {photo ? (
-                  <Image source={{ uri: photo }} style={styles.photoPreview} />
-                ) : (
-                  <>
-                    <Text style={styles.photoIcon}>📷</Text>
-                    <Text style={styles.photoText}>Tap to add photo</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[styles.photoButton, styles.lockedField]}
-                onPress={() => router.push('/premium')}
-              >
-                <Text style={styles.lockIcon}>🔒</Text>
-                <Text style={styles.lockedText}>Upgrade to unlock</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>📸 Photo Evidence</Text>
+              {!userData?.isPremium && (
+                <Text style={[styles.limitBadge, !canAddPhoto && styles.limitReached]}>
+                  {photosRemaining}/{FREE_TIER_LIMITS.photosPerWeek} left
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity 
+              style={[styles.photoButton, !canAddPhoto && !photo && styles.disabledField]} 
+              onPress={pickImage}
+            >
+              {photo ? (
+                <Image source={{ uri: photo }} style={styles.photoPreview} />
+              ) : (
+                <>
+                  <Text style={styles.photoIcon}>{canAddPhoto ? '📷' : '🔒'}</Text>
+                  <Text style={[styles.photoText, !canAddPhoto && styles.disabledText]}>
+                    {canAddPhoto ? 'Tap to add photo' : 'Weekly limit reached'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
 
             {/* Notes Section */}
-            <Text style={styles.sectionLabel}>📝 Notes</Text>
-            {userData?.isPremium ? (
-              <TextInput
-                style={styles.notesInput}
-                placeholder="Add a note (optional)..."
-                placeholderTextColor={COLORS.textTertiary}
-                value={notes}
-                onChangeText={setNotes}
-                multiline
-                numberOfLines={3}
-              />
-            ) : (
-              <TouchableOpacity
-                style={[styles.notesInput, styles.lockedField, styles.lockedNotes]}
-                onPress={() => router.push('/premium')}
-              >
-                <Text style={styles.lockIcon}>🔒</Text>
-                <Text style={styles.lockedText}>Upgrade to unlock</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>📝 Notes</Text>
+              {!userData?.isPremium && (
+                <Text style={[styles.limitBadge, !canAddNote && styles.limitReached]}>
+                  {notesRemaining}/{FREE_TIER_LIMITS.notesPerWeek} left
+                </Text>
+              )}
+            </View>
+            <TextInput
+              style={[styles.notesInput, !canAddNote && notes.length === 0 && styles.disabledField]}
+              placeholder={canAddNote ? 'Add a note (optional)...' : 'Weekly limit reached'}
+              placeholderTextColor={COLORS.textTertiary}
+              value={notes}
+              onChangeText={handleNotesChange}
+              multiline
+              numberOfLines={3}
+              editable={canAddNote || notes.length > 0}
+            />
 
             {/* Action Buttons */}
             <View style={styles.modalButtons}>
@@ -423,11 +499,24 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.textTertiary,
     marginVertical: 16,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   sectionLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.textSecondary,
-    marginBottom: 8,
+  },
+  limitBadge: {
+    fontSize: 12,
+    color: COLORS.secondary,
+    fontWeight: '600',
+  },
+  limitReached: {
+    color: COLORS.error,
   },
   photoButton: {
     backgroundColor: COLORS.background,
@@ -454,21 +543,12 @@ const styles = StyleSheet.create({
     color: COLORS.secondary,
     fontSize: 14,
   },
-  lockedField: {
+  disabledField: {
     borderColor: COLORS.textTertiary,
-    backgroundColor: `${COLORS.background}80`,
+    opacity: 0.6,
   },
-  lockedNotes: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  lockIcon: {
-    fontSize: 24,
-    marginRight: 8,
-  },
-  lockedText: {
+  disabledText: {
     color: COLORS.textTertiary,
-    fontSize: 14,
   },
   notesInput: {
     backgroundColor: COLORS.background,

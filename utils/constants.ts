@@ -36,6 +36,14 @@ export const GOOD_DEEDS = [
 
 export const PREMIUM_PRICE = 4.99;
 
+// Free tier limits (per week for notes/photos, total for custom items)
+export const FREE_TIER_LIMITS = {
+  notesPerWeek: 5,
+  photosPerWeek: 5,
+  customTriggers: 2,
+  customDeeds: 2,
+};
+
 export const APP_INFO = {
   name: 'Scoremate',
   version: '1.0.0',

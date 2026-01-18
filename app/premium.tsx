@@ -193,24 +193,19 @@ export default function PremiumScreen() {
 
   const features = [
     {
-      icon: '✏️',
-      title: 'Custom Triggers & Deeds',
-      description: "Create your own unique items tailored to your relationship",
+      icon: '♾️',
+      title: 'Unlimited Custom Items',
+      description: 'Create unlimited triggers & deeds (free tier: 2 each)',
     },
     {
       icon: '📸',
-      title: 'Photo Evidence',
-      description: "Attach photos to prove your partner's crimes (or your good deeds)",
+      title: 'Unlimited Photo Evidence',
+      description: 'Add photos to every report (free tier: 5/week)',
     },
     {
       icon: '📝',
-      title: 'Add Notes',
-      description: 'Include detailed descriptions with each report',
-    },
-    {
-      icon: '🔔',
-      title: 'Partner Notifications',
-      description: 'Get notified instantly when your partner reports something',
+      title: 'Unlimited Notes',
+      description: 'Add notes to every report (free tier: 5/week)',
     },
     {
       icon: '🎯',
@@ -220,7 +215,12 @@ export default function PremiumScreen() {
     {
       icon: '💰',
       title: 'One-Time Payment',
-      description: 'No subscription, no recurring charges, just $5 forever',
+      description: 'No subscription, no recurring charges, pay once forever',
+    },
+    {
+      icon: '💝',
+      title: 'Support Development',
+      description: 'Help us keep building features for toxic couples!',
     },
   ];
 
