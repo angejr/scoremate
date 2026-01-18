@@ -1,5 +1,5 @@
 // ============================================
-// app/report.tsx - Report Screen
+// app/report.tsx - Report Screen with Confirmation Modal
 // ============================================
 
 import * as ImagePicker from 'expo-image-picker';
@@ -9,8 +9,8 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -35,6 +35,7 @@ export default function ReportScreen() {
   const [notes, setNotes] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
     let baseItems = type === 'trigger' ? [...TRIGGERS] : [...GOOD_DEEDS];
@@ -50,12 +51,12 @@ export default function ReportScreen() {
 
   const pickImage = async () => {
     if (!userData?.isPremium) {
-      Alert.alert('Premium Feature', 'Upgrade to premium to add photos to your reports!');
+      router.push('/premium');
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.5,
@@ -84,14 +85,18 @@ export default function ReportScreen() {
     }
   };
 
-  const submitReport = async (item: TriggerItem | DeedItem) => {
+  const submitReport = async () => {
+    if (!selectedItem) return;
+
     if (!userData?.partnerId && type === 'trigger') {
-      Alert.alert('Error', 'You need to link with a partner first!');
+      setShowModal(false);
+      setTimeout(() => {
+        router.push('/link-partner');
+      }, 300);
       return;
     }
 
     if (!auth.currentUser) {
-      Alert.alert('Error', 'You must be logged in');
       return;
     }
 
@@ -108,15 +113,15 @@ export default function ReportScreen() {
         userId: auth.currentUser.uid,
         targetId: type === 'trigger' ? userData?.partnerId : auth.currentUser.uid,
         type: type,
-        itemId: item.id,
-        itemName: item.name,
-        points: item.points,
+        itemId: selectedItem.id,
+        itemName: selectedItem.name,
+        points: selectedItem.points,
         photoUrl: photoUrl,
         notes: userData?.isPremium ? notes : '',
         timestamp: new Date(),
         weekNumber: currentWeek,
         year: new Date().getFullYear(),
-        isCustom: item.isCustom || false,
+        isCustom: selectedItem.isCustom || false,
       };
 
       await addDoc(collection(db, 'reports'), reportData);
@@ -128,38 +133,36 @@ export default function ReportScreen() {
           userData.partnerId,
           reporterName,
           type as 'trigger' | 'deed',
-          item.name,
-          item.points
+          selectedItem.name,
+          selectedItem.points
         );
       }
 
-      const message =
-        type === 'trigger'
-          ? `Your partner lost ${Math.abs(item.points)} points for: ${item.name}`
-          : `You gained ${item.points} points for: ${item.name}`;
+      setShowModal(false);
+      setSelectedItem(null);
+      setNotes('');
+      setPhoto(null);
 
-      Alert.alert('Success!', message, [{ text: 'OK', onPress: () => router.back() }]);
+      router.back();
     } catch (error) {
       console.error('Error submitting report:', error);
-      Alert.alert('Error', 'Failed to submit report. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleItemPress = (item: TriggerItem | DeedItem) => {
-    if (!userData?.isPremium || (!notes && !photo)) {
-      Alert.alert(
-        'Confirm Report',
-        `Report: ${item.name} (${item.points > 0 ? '+' : ''}${item.points} points)?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', onPress: () => submitReport(item) },
-        ]
-      );
-    } else {
-      setSelectedItem(item);
-    }
+    setSelectedItem(item);
+    setNotes('');
+    setPhoto(null);
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setSelectedItem(null);
+    setNotes('');
+    setPhoto(null);
   };
 
   if (loading) {
@@ -174,31 +177,6 @@ export default function ReportScreen() {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        {userData?.isPremium && (
-          <View style={styles.premiumSection}>
-            <TouchableOpacity style={styles.photoButton} onPress={pickImage}>
-              {photo ? (
-                <Image source={{ uri: photo }} style={styles.photoPreview} />
-              ) : (
-                <>
-                  <Text style={styles.photoIcon}>📸</Text>
-                  <Text style={styles.photoText}>Add Photo Evidence</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TextInput
-              style={styles.notesInput}
-              placeholder="Add notes (optional)..."
-              placeholderTextColor={COLORS.textTertiary}
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-              numberOfLines={3}
-            />
-          </View>
-        )}
-
         <View style={styles.itemsContainer}>
           <Text style={styles.sectionTitle}>
             {type === 'trigger' ? '😤 Select Mistake' : '✨ Select Good Deed'}
@@ -229,30 +207,104 @@ export default function ReportScreen() {
             </TouchableOpacity>
           ))}
         </View>
-
-        {!userData?.isPremium && (
-          <View style={styles.upsellCard}>
-            <Text style={styles.upsellTitle}>⭐ Upgrade to Premium ⭐</Text>
-            <Text style={styles.upsellText}>
-              Add custom {type === 'trigger' ? 'triggers' : 'deeds'}, photos, and notes!
-            </Text>
-            <TouchableOpacity style={styles.upsellButton} onPress={() => router.push('/premium')}>
-              <Text style={styles.upsellButtonText}>Upgrade Now - $5</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </ScrollView>
 
-      {selectedItem && (
-        <View style={styles.submitContainer}>
-          <TouchableOpacity style={styles.submitButton} onPress={() => submitReport(selectedItem)}>
-            <Text style={styles.submitButtonText}>
-              Submit: {selectedItem.name} ({selectedItem.points > 0 ? '+' : ''}
-              {selectedItem.points})
-            </Text>
-          </TouchableOpacity>
+      {/* Confirmation Modal */}
+      <Modal
+        visible={showModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {/* Selected Item Preview */}
+            {selectedItem && (
+              <View style={styles.selectedItemPreview}>
+                <Text style={styles.selectedItemEmoji}>{selectedItem.emoji}</Text>
+                <View style={styles.selectedItemInfo}>
+                  <Text style={styles.selectedItemName}>{selectedItem.name}</Text>
+                  <Text
+                    style={[
+                      styles.selectedItemPoints,
+                      selectedItem.points > 0 ? styles.pointsPositive : styles.pointsNegative,
+                    ]}
+                  >
+                    {selectedItem.points > 0 ? '+' : ''}
+                    {selectedItem.points} points
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.divider} />
+
+            {/* Photo Section */}
+            <Text style={styles.sectionLabel}>📸 Photo Evidence</Text>
+            {userData?.isPremium ? (
+              <TouchableOpacity style={styles.photoButton} onPress={pickImage}>
+                {photo ? (
+                  <Image source={{ uri: photo }} style={styles.photoPreview} />
+                ) : (
+                  <>
+                    <Text style={styles.photoIcon}>📷</Text>
+                    <Text style={styles.photoText}>Tap to add photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.photoButton, styles.lockedField]}
+                onPress={() => router.push('/premium')}
+              >
+                <Text style={styles.lockIcon}>🔒</Text>
+                <Text style={styles.lockedText}>Upgrade to unlock</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Notes Section */}
+            <Text style={styles.sectionLabel}>📝 Notes</Text>
+            {userData?.isPremium ? (
+              <TextInput
+                style={styles.notesInput}
+                placeholder="Add a note (optional)..."
+                placeholderTextColor={COLORS.textTertiary}
+                value={notes}
+                onChangeText={setNotes}
+                multiline
+                numberOfLines={3}
+              />
+            ) : (
+              <TouchableOpacity
+                style={[styles.notesInput, styles.lockedField, styles.lockedNotes]}
+                onPress={() => router.push('/premium')}
+              >
+                <Text style={styles.lockIcon}>🔒</Text>
+                <Text style={styles.lockedText}>Upgrade to unlock</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Action Buttons */}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={closeModal}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  type === 'trigger' ? styles.submitButtonTrigger : styles.submitButtonDeed,
+                ]}
+                onPress={submitReport}
+              >
+                <Text style={styles.submitButtonText}>
+                  {type === 'trigger' ? '😤 Report' : '✨ Log It'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 }
@@ -276,50 +328,11 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
   },
-  premiumSection: {
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.textTertiary,
-  },
-  photoButton: {
-    backgroundColor: COLORS.cardBackground,
-    padding: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginBottom: 15,
-    borderWidth: 2,
-    borderColor: COLORS.secondary,
-    borderStyle: 'dashed',
-  },
-  photoPreview: {
-    width: '100%',
-    height: 200,
-    borderRadius: 10,
-  },
-  photoIcon: {
-    fontSize: 40,
-    marginBottom: 5,
-  },
-  photoText: {
-    color: COLORS.secondary,
-    fontSize: 16,
-  },
-  notesInput: {
-    backgroundColor: COLORS.cardBackground,
-    color: COLORS.text,
-    padding: 15,
-    borderRadius: 10,
-    fontSize: 16,
-    minHeight: 80,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: COLORS.textTertiary,
-  },
   itemsContainer: {
     padding: 20,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.text,
     marginBottom: 15,
@@ -327,7 +340,7 @@ const styles = StyleSheet.create({
   itemCard: {
     backgroundColor: COLORS.cardBackground,
     padding: 15,
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -343,8 +356,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   itemEmoji: {
-    fontSize: 24,
-    marginRight: 10,
+    fontSize: 28,
+    marginRight: 12,
   },
   itemTextContainer: {
     flex: 1,
@@ -369,49 +382,135 @@ const styles = StyleSheet.create({
   pointsNegative: {
     color: COLORS.error,
   },
-  upsellCard: {
-    backgroundColor: `${COLORS.accent}30`,
-    padding: 20,
-    margin: 20,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.accent,
-    alignItems: 'center',
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
   },
-  upsellTitle: {
-    color: COLORS.accent,
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  upsellText: {
-    color: COLORS.text,
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 15,
-  },
-  upsellButton: {
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 30,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  upsellButtonText: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  submitContainer: {
-    padding: 20,
+  modalContent: {
     backgroundColor: COLORS.cardBackground,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.textTertiary,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    maxHeight: '80%',
+  },
+  selectedItemPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  selectedItemEmoji: {
+    fontSize: 48,
+    marginRight: 16,
+  },
+  selectedItemInfo: {
+    flex: 1,
+  },
+  selectedItemName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  selectedItemPoints: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: COLORS.textTertiary,
+    marginVertical: 16,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  photoButton: {
+    backgroundColor: COLORS.background,
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: COLORS.secondary,
+    borderStyle: 'dashed',
+    minHeight: 100,
+    justifyContent: 'center',
+  },
+  photoPreview: {
+    width: '100%',
+    height: 150,
+    borderRadius: 10,
+  },
+  photoIcon: {
+    fontSize: 32,
+    marginBottom: 4,
+  },
+  photoText: {
+    color: COLORS.secondary,
+    fontSize: 14,
+  },
+  lockedField: {
+    borderColor: COLORS.textTertiary,
+    backgroundColor: `${COLORS.background}80`,
+  },
+  lockedNotes: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  lockIcon: {
+    fontSize: 24,
+    marginRight: 8,
+  },
+  lockedText: {
+    color: COLORS.textTertiary,
+    fontSize: 14,
+  },
+  notesInput: {
+    backgroundColor: COLORS.background,
+    color: COLORS.text,
+    padding: 15,
+    borderRadius: 12,
+    fontSize: 16,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: COLORS.textTertiary,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.textTertiary,
+  },
+  cancelButtonText: {
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: '600',
   },
   submitButton: {
-    backgroundColor: COLORS.primary,
-    padding: 18,
-    borderRadius: 10,
+    flex: 2,
+    padding: 16,
+    borderRadius: 12,
     alignItems: 'center',
+  },
+  submitButtonDeed: {
+    backgroundColor: COLORS.success,
+  },
+  submitButtonTrigger: {
+    backgroundColor: COLORS.error,
   },
   submitButtonText: {
     color: COLORS.text,

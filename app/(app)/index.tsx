@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Modal,
   RefreshControl,
   ScrollView,
@@ -29,6 +30,8 @@ interface ReportItem {
   timestamp: Date;
   userId: string;
   targetId: string;
+  photoUrl: string | null;
+  notes: string;
 }
 
 export default function HomeScreen() {
@@ -40,6 +43,7 @@ export default function HomeScreen() {
   const [weeklyReports, setWeeklyReports] = useState<ReportItem[]>([]);
   const [scoreSummaryVisible, setScoreSummaryVisible] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<'user' | 'partner'>('user');
+  const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
 
   useEffect(() => {
     if (userData) {
@@ -94,6 +98,8 @@ export default function HomeScreen() {
           timestamp: data.timestamp?.toDate() || new Date(),
           userId: data.userId,
           targetId: data.targetId,
+          photoUrl: data.photoUrl || null,
+          notes: data.notes || '',
         };
         reports.push(report);
 
@@ -134,7 +140,12 @@ export default function HomeScreen() {
 
   const showScoreSummary = (person: 'user' | 'partner') => {
     setSelectedPerson(person);
+    setExpandedReportId(null);
     setScoreSummaryVisible(true);
+  };
+
+  const toggleReportDetails = (reportId: string) => {
+    setExpandedReportId(expandedReportId === reportId ? null : reportId);
   };
 
   const onRefresh = async () => {
@@ -186,6 +197,67 @@ export default function HomeScreen() {
   const selectedReports = getReportsForPerson(selectedPerson);
   const selectedName = selectedPerson === 'user' ? 'You' : (partnerData?.name || 'Partner');
   const selectedScore = selectedPerson === 'user' ? userScore : partnerScore;
+
+  const renderReportItem = ({ item }: { item: ReportItem }) => {
+    const hasEvidence = item.photoUrl || item.notes;
+    const isExpanded = expandedReportId === item.id;
+
+    return (
+      <TouchableOpacity 
+        style={[styles.reportItem, hasEvidence && styles.reportItemWithEvidence]}
+        onPress={() => hasEvidence && toggleReportDetails(item.id)}
+        activeOpacity={hasEvidence ? 0.7 : 1}
+      >
+        <View style={styles.reportMainRow}>
+          <View style={styles.reportInfo}>
+            <View style={styles.reportTitleRow}>
+              <Text style={styles.reportType}>
+                {item.type === 'deed' ? '✨' : '😤'} {item.itemName}
+              </Text>
+              {hasEvidence && (
+                <View style={styles.evidenceBadge}>
+                  {item.photoUrl && <Text style={styles.evidenceIcon}>📸</Text>}
+                  {item.notes && <Text style={styles.evidenceIcon}>📝</Text>}
+                </View>
+              )}
+            </View>
+            <Text style={styles.reportDate}>
+              {item.timestamp.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+            </Text>
+          </View>
+          <Text style={[
+            styles.reportPoints,
+            item.points > 0 ? styles.pointsPositive : styles.pointsNegative
+          ]}>
+            {item.points > 0 ? '+' : ''}{item.points}
+          </Text>
+        </View>
+
+        {/* Expanded Evidence Section */}
+        {isExpanded && hasEvidence && (
+          <View style={styles.evidenceSection}>
+            {item.photoUrl && (
+              <Image 
+                source={{ uri: item.photoUrl }} 
+                style={styles.evidencePhoto}
+                resizeMode="cover"
+              />
+            )}
+            {item.notes && (
+              <View style={styles.notesContainer}>
+                <Text style={styles.notesLabel}>📝 Notes:</Text>
+                <Text style={styles.notesText}>{item.notes}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {hasEvidence && !isExpanded && (
+          <Text style={styles.tapToExpand}>Tap to view evidence</Text>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -311,24 +383,7 @@ export default function HomeScreen() {
                 data={selectedReports}
                 keyExtractor={(item) => item.id}
                 style={styles.reportsList}
-                renderItem={({ item }) => (
-                  <View style={styles.reportItem}>
-                    <View style={styles.reportInfo}>
-                      <Text style={styles.reportType}>
-                        {item.type === 'deed' ? '✨' : '😤'} {item.itemName}
-                      </Text>
-                      <Text style={styles.reportDate}>
-                        {item.timestamp.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                      </Text>
-                    </View>
-                    <Text style={[
-                      styles.reportPoints,
-                      item.points > 0 ? styles.pointsPositive : styles.pointsNegative
-                    ]}>
-                      {item.points > 0 ? '+' : ''}{item.points}
-                    </Text>
-                  </View>
-                )}
+                renderItem={renderReportItem}
               />
             )}
 
@@ -552,7 +607,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -593,24 +648,43 @@ const styles = StyleSheet.create({
     color: COLORS.error,
   },
   reportsList: {
-    maxHeight: 300,
+    maxHeight: 350,
   },
   reportItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     backgroundColor: COLORS.background,
     padding: 15,
     borderRadius: 10,
     marginBottom: 8,
   },
+  reportItemWithEvidence: {
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.accent,
+  },
+  reportMainRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   reportInfo: {
     flex: 1,
+  },
+  reportTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
   },
   reportType: {
     fontSize: 16,
     color: COLORS.text,
     marginBottom: 3,
+  },
+  evidenceBadge: {
+    flexDirection: 'row',
+    marginLeft: 8,
+    gap: 4,
+  },
+  evidenceIcon: {
+    fontSize: 14,
   },
   reportDate: {
     fontSize: 12,
@@ -626,6 +700,39 @@ const styles = StyleSheet.create({
   },
   pointsNegative: {
     color: COLORS.error,
+  },
+  tapToExpand: {
+    fontSize: 11,
+    color: COLORS.accent,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  evidenceSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.textTertiary,
+  },
+  evidencePhoto: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  notesContainer: {
+    backgroundColor: COLORS.cardBackground,
+    padding: 12,
+    borderRadius: 8,
+  },
+  notesLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  notesText: {
+    fontSize: 14,
+    color: COLORS.text,
+    lineHeight: 20,
   },
   emptyState: {
     alignItems: 'center',
